@@ -59,7 +59,6 @@ public class Main {
         byte[] cipherText = bOut.toByteArray();
 
         System.out.println("cipher: " + Utils.toHex(cipherText));
-/*
         // decryption pass
 
         cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
@@ -72,6 +71,6 @@ public class Main {
 
         cOut.close();
 
-        System.out.println("plain : " + Utils.toHex(bOut.toByteArray()));*/
+        System.out.println("plain : " + Utils.toHex(bOut.toByteArray()));
     }
 }
