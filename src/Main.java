@@ -1,6 +1,3 @@
-
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -38,7 +35,7 @@ public class Main {
 
         SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
         IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
-        Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", BouncyCastleProvider.PROVIDER_NAME);
+        Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
 
 
         System.out.println("input : " + Utils.toHex(input));
