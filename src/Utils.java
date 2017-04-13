@@ -136,6 +136,17 @@ public class Utils {
         return new String(chars);
     }
 
+    public static String toStringRange(byte[] bytes, int start, int end) {
+        char[] chars = new char[end - start];
+        int j = 0;
+        for (int i = start; i != end; i++) {
+            chars[j] = (char) (bytes[i] & 0xff);
+            j++;
+        }
+
+        return new String(chars);
+    }
+
     /**
      * Convert a byte array of 8 bit characters into a String.
      *
@@ -154,7 +165,7 @@ public class Utils {
      * @param string the string to be converted
      * @return a byte array representation
      */
-    public static byte[] toByteArray(
+    static byte[] toByteArray(
             String string) {
         byte[] bytes = new byte[string.length()];
         char[] chars = string.toCharArray();
@@ -164,6 +175,14 @@ public class Utils {
         }
 
         return bytes;
+    }
+
+    static String paddString(String t) {
+        return String.format("%-" + 80 + "s", t).replace(' ', '!');
+    }
+
+    static String removePadd(String t) {
+        return t.substring(0, t.indexOf("!"));
     }
 
 

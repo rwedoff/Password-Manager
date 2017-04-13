@@ -6,12 +6,31 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.SecureRandom;
-import java.security.Security;
-import java.util.Arrays;
-import java.util.Scanner;
+import java.security.*;
+import java.util.*;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+
+import javax.crypto.Cipher;
+import javax.crypto.CipherInputStream;
+import javax.crypto.CipherOutputStream;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 public class Main {
+    private static HashMap<String, Entry> entryList = new HashMap<>();
+
+    //TODO change to random iv and legit key.
+    static byte[] ivBytes = new byte[]{
+            0x00, 0x01, 0x02, 0x03, 0x00, 0x01, 0x02, 0x03,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
+    static byte[] keyBytes = new byte[]{
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17};
+
 
     public static void main(String[] args) throws IOException {
         //Todo Figure out how to run from commandline
@@ -46,6 +65,12 @@ public class Main {
                     System.exit(0);
                 }
             }
+            //TODO check ingerity here
+            try {
+                decryptFile(keyBytes, ivBytes);
+            } catch (NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException | InvalidAlgorithmParameterException | InvalidKeyException e) {
+                e.printStackTrace();
+            }
 
             //Main Menu code
             while (true) {
@@ -56,27 +81,39 @@ public class Main {
                 System.out.println("3: Delete Account");
                 System.out.println("4: Change Account");
                 System.out.println("5: Get Password");
-                System.out.println("0: Exit");
+                System.out.println("0: Save/Exit");
                 int option = scan.nextInt();
                 switch (option) {
                     case 1:
                         System.out.println("Check Integrity TODO");
                         break;
                     case 2:
-                        System.out.println("Register Account TODO");
+                        addAccount();
                         break;
                     case 3:
-                        System.out.println("Delete Account TODO");
+                        deleteAccount();
                         break;
                     case 4:
                         System.out.println("Change Account TODO");
+                        changeAccount();
                         break;
                     case 5:
-                        System.out.println("Get Password TODO");
+                        getAccount();
                         break;
                     case 0:
+                        System.out.println("Saving...");
+                        try {
+                            encryptFile(keyBytes, ivBytes);
+                        } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
+                            e.printStackTrace();
+                        }
                         System.out.println("Exiting...");
                         System.exit(0);
+                        break;
+                    //TODO REMOVE; only for debug!
+                    case 9:
+                        System.out.println("Printing List");
+                        printEntryList();
                         break;
                     default:
                         System.out.println("Not a command");
@@ -84,8 +121,8 @@ public class Main {
                 }
             }
         }
-        //For AES encryption, look at Chapter 2 examples
     }
+
 
     /**
      * Reads the master_passwd file and checks if it matches the given password
@@ -194,5 +231,258 @@ public class Main {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Given the static EntryList, this encrypts the whole file and writes to passwd_file
+     *
+     * @param keyBytes Key to encrypt
+     * @param ivBytes  Random IV
+     * @throws InvalidAlgorithmParameterException Bouncy Castle required
+     * @throws InvalidKeyException                Bouncy Castle required
+     * @throws NoSuchPaddingException             Bouncy Castle required
+     * @throws NoSuchAlgorithmException           Bouncy Castle required
+     * @throws NoSuchProviderException            Bouncy Castle required
+     * @throws IOException                        Caught if passwd_file can't be written to.
+     */
+    private static void encryptFile(byte[] keyBytes, byte[] ivBytes) throws InvalidAlgorithmParameterException, InvalidKeyException, NoSuchPaddingException, NoSuchAlgorithmException, NoSuchProviderException, IOException {
+        //TODO think about, is the key just the masterPass file?  Should the masterpass file be unencrypted?
+        //Todo add a key and iv file
+        //Todo where do we save the IV, master pass? In plaintext in passwd_file?
+        //TODO should we decrypt first and then re-encrypt with the new record (auto saving)
+        //TODO run encryption after every operation?
+        //TODO What do we do if there are multiple accounts with the same domain? HashMap doesn't allow duplicates
+
+        SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
+        IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
+        Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
+
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+
+        for (String mapKey : entryList.keySet()) {
+            input.write(Utils.toByteArray(entryList.get(mapKey).toString()));
+        }
+
+        // encryption pass
+        cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
+
+        ByteArrayInputStream bIn = new ByteArrayInputStream(input.toByteArray());
+        CipherInputStream cIn = new CipherInputStream(bIn, cipher);
+        ByteArrayOutputStream bOut = new ByteArrayOutputStream();
+
+        int ch;
+        while ((ch = cIn.read()) >= 0) {
+            bOut.write(ch);
+        }
+
+        byte[] cipherText = bOut.toByteArray();
+
+        //System.out.println("cipher: " + Utils.toHex(cipherText));
+
+        try (OutputStream outputStream = new FileOutputStream("passwd_file")) {
+            bOut.writeTo(outputStream);
+        }
+    }
+
+    /**
+     * Decrypts the whole file and builds Entry objects
+     *
+     * @param keyBytes Key to encrypt the file
+     * @param ivBytes  Random IV used for encryption
+     * @throws IOException                        Bouncy Castle required
+     * @throws NoSuchPaddingException             Bouncy Castle required
+     * @throws NoSuchAlgorithmException           Bouncy Castle required
+     * @throws NoSuchProviderException            Bouncy Castle required
+     * @throws InvalidAlgorithmParameterException Bouncy Castle required
+     * @throws InvalidKeyException                Thrown if passwd_file can't be read.
+     * @see Entry
+     */
+    private static void decryptFile(byte[] keyBytes, byte[] ivBytes) throws IOException, NoSuchPaddingException, NoSuchAlgorithmException, NoSuchProviderException, InvalidAlgorithmParameterException, InvalidKeyException {
+        entryList.clear();
+        //Decrypt the whole password file
+        Path path = Paths.get("passwd_file");
+        byte[] data = Files.readAllBytes(path);
+
+        SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
+        IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
+        Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
+
+        cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
+        ByteArrayOutputStream bOut = new ByteArrayOutputStream();
+
+        CipherOutputStream cOut = new CipherOutputStream(bOut, cipher);
+
+        cOut.write(data);
+
+        cOut.close();
+
+        byte[] fileBytes = bOut.toByteArray();
+
+        int fileSize = fileBytes.length;
+        int j = 0;
+        for (int i = 0; i < fileSize; i++) {
+            if (i % 240 == 0) {
+                j += 240;
+                entryList.put(Utils.toStringRange(fileBytes, i, j - 160), new Entry(Utils.toStringRange(fileBytes, i, j)));
+            }
+        }
+    }
+
+    /**
+     * Adds an account/Entry to static Entry list
+     *
+     * @see Entry
+     */
+    private static void addAccount() {
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("Account Name:");
+        String accountName = scanner.nextLine();
+        System.out.println("User Name:");
+        String userName = scanner.nextLine();
+        System.out.println("Password");
+        String password = scanner.nextLine();
+
+        Entry e = getAccountHelper(accountName);
+        if (e != null && !(e.getDomain().equals(accountName) && e.getUser().equals(userName))) {
+            System.out.println("USER ACCOUNT ALREADY EXISTS");
+            return;
+        }
+        entryList.put(Utils.paddString(accountName), new Entry(accountName, userName, password));
+    }
+
+    /**
+     * Helper method that calls EntryList hashMap for the given account
+     *
+     * @param account Account is the domain name
+     * @return Entry that was found or null
+     * @see Entry
+     */
+    private static Entry getAccountHelper(String account) {
+        return entryList.get(Utils.paddString(account));
+    }
+
+    /**
+     * Deletes an account from EntryList
+     */
+    private static void deleteAccount() {
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("Enter Account Name to Delete:");
+        String account = scanner.nextLine();
+        Entry entry = getAccountHelper(account);
+        if (entry == null) {
+            System.out.println("USER ACCOUNT DOES NOT EXIST!");
+            return;
+        }
+        entryList.remove(Utils.paddString(account));
+        System.out.println("Entry Deleted");
+    }
+
+    /**
+     * Gets the account and prints out user name and password.
+     * Only works if there aren't repeat domains.
+     */
+    private static void getAccount() {
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("Enter Account Name:");
+        String account = scanner.nextLine();
+        Entry entry = getAccountHelper(account);
+        if (entry == null) {
+            System.out.println("USER ACCOUNT DOES NOT EXIST!");
+            return;
+        }
+        System.out.println("username " + Utils.removePadd(entry.getUser()) + " " + "password " + Utils.removePadd(entry.getPassword()));
+    }
+
+
+    private static void changeAccount() {
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("Enter Account Name:");
+        String account = scanner.nextLine();
+        Entry entry = getAccountHelper(account);
+        if (entry == null) {
+            System.out.println("USER ACCOUNT DOES NOT EXIST!");
+            return;
+        }
+        System.out.println("Enter Username for Account:");
+        String userName = scanner.nextLine();
+        System.out.println("Enter Old Password for Account:");
+        String oldPassword = scanner.nextLine();
+        System.out.println("Enter New Password for Account:");
+        String newPassword = scanner.nextLine();
+
+        entryList.replace(Utils.paddString(account), new Entry(account, userName, newPassword));
+    }
+
+    private static void printEntryList() {
+        //Debug used for seeing the whole file todo
+        for (String mapKey : entryList.keySet()) {
+            System.out.println(entryList.get(mapKey));
+        }
+    }
+
+    /**
+     * Inner class representing the Entries of the password manager
+     */
+    private static class Entry {
+        private String domain;
+        private String user;
+        private String password;
+
+        //Constructor used for new Entry
+        private Entry(String domain, String user, String password) {
+            this.domain = Utils.paddString(domain);
+            this.user = Utils.paddString(user);
+            this.password = Utils.paddString(password);
+        }
+
+        //Constructor used for read entry
+        private Entry(String fullString) {
+            this.domain = fullString.substring(0, 80);
+            this.user = fullString.substring(80, 160);
+            this.password = fullString.substring(160, 240);
+        }
+
+        public String getDomain() {
+            return domain;
+        }
+
+        public void setDomain(String domain) {
+            this.domain = domain;
+        }
+
+        public String getUser() {
+            return user;
+        }
+
+        public void setUser(String user) {
+            this.user = user;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
+
+        /**
+         * Returns an entry object with domain user and password each padded to 80 bytes.
+         *
+         * @return <domain>!!!!!!<user>!!!!!!<password>!!!!!!
+         */
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            domain = String.format("%-" + 80 + "s", domain).replace(' ', '!');
+            user = String.format("%-" + 80 + "s", user).replace(' ', '!');
+            password = String.format("%-" + 80 + "s", password).replace(' ', '!');
+            sb.append(domain);
+            sb.append(user);
+            sb.append(password);
+            return sb.toString();
+        }
+
+
     }
 }
