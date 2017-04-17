@@ -32,7 +32,7 @@ public class Main {
             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17};
 
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
         //Todo Figure out how to run from commandline
         //Configuration steps:  Add Bouncy Castle jars to project, test if we actually need both.
         //Check Java security to make sure the JRE can do some security magic... (Potential Error: Invalid Key Length)
@@ -51,76 +51,76 @@ public class Main {
             String mastPass = scan.nextLine();
             System.out.println(mastPass);
             createFiles(mastPass);
-        } else {
-            //Checks given password with a saved password
-            System.out.println("Welcome Back. Please enter your password:");
-            Scanner scan = new Scanner(System.in);
-            String mastPass = scan.nextLine();
-            while (!readMasterPass(mastPass)) {
-                System.out.println("WRONG MASTER PASSWORD!");
-                System.out.println("Type <0> to quit");
-                mastPass = scan.nextLine();
-                if (mastPass.equals("0")) {
-                    System.out.println("Exiting...");
-                    System.exit(0);
-                }
-            }
-            //TODO check ingerity here
-            try {
-                decryptFile(keyBytes, ivBytes);
-            } catch (NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException | InvalidAlgorithmParameterException | InvalidKeyException e) {
-                e.printStackTrace();
-            }
-
-            //Main Menu code
-            while (true) {
-                System.out.println("\n\n\n");
-                System.out.println("Welcome User! Type in a command to begin.");
-                System.out.println("1: Check Integrity");
-                System.out.println("2: Register Account");
-                System.out.println("3: Delete Account");
-                System.out.println("4: Change Account");
-                System.out.println("5: Get Password");
-                System.out.println("0: Save/Exit");
-                int option = scan.nextInt();
-                switch (option) {
-                    case 1:
-                        System.out.println("Check Integrity TODO");
-                        break;
-                    case 2:
-                        addAccount();
-                        break;
-                    case 3:
-                        deleteAccount();
-                        break;
-                    case 4:
-                        System.out.println("Change Account TODO");
-                        changeAccount();
-                        break;
-                    case 5:
-                        getAccount();
-                        break;
-                    case 0:
-                        System.out.println("Saving...");
-                        try {
-                            encryptFile(keyBytes, ivBytes);
-                        } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
-                            e.printStackTrace();
-                        }
-                        System.out.println("Exiting...");
-                        System.exit(0);
-                        break;
-                    //TODO REMOVE; only for debug!
-                    case 9:
-                        System.out.println("Printing List");
-                        printEntryList();
-                        break;
-                    default:
-                        System.out.println("Not a command");
-                        break;
-                }
+        }
+        //Checks given password with a saved password
+        System.out.println("Welcome! Please enter your password:");
+        Scanner scan = new Scanner(System.in);
+        String mastPass = scan.nextLine();
+        while (!readMasterPass(mastPass)) {
+            System.out.println("WRONG MASTER PASSWORD!");
+            System.out.println("Type <0> to quit");
+            mastPass = scan.nextLine();
+            if (mastPass.equals("0")) {
+                System.out.println("Exiting...");
+                System.exit(0);
             }
         }
+        //TODO check ingerity here
+        try {
+            decryptFile(keyBytes, ivBytes);
+        } catch (NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException | InvalidAlgorithmParameterException | InvalidKeyException e) {
+            e.printStackTrace();
+        }
+
+        //Main Menu code
+        while (true) {
+            System.out.println("\n\n\n");
+            System.out.println("Welcome User! Type in a command to begin.");
+            System.out.println("1: Check Integrity");
+            System.out.println("2: Register Account");
+            System.out.println("3: Delete Account");
+            System.out.println("4: Change Account");
+            System.out.println("5: Get Password");
+            System.out.println("0: Save/Exit");
+            int option = scan.nextInt();
+            switch (option) {
+                case 1:
+                    System.out.println("Check Integrity TODO");
+                    break;
+                case 2:
+                    addAccount();
+                    break;
+                case 3:
+                    deleteAccount();
+                    break;
+                case 4:
+                    System.out.println("Change Account TODO");
+                    changeAccount();
+                    break;
+                case 5:
+                    getAccount();
+                    break;
+                case 0:
+                    System.out.println("Saving...");
+                    try {
+                        encryptFile(keyBytes, ivBytes);
+                    } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
+                        e.printStackTrace();
+                    }
+                    System.out.println("Exiting...");
+                    System.exit(0);
+                    break;
+                //TODO REMOVE; only for debug!
+                case 9:
+                    System.out.println("Printing List");
+                    printEntryList();
+                    break;
+                default:
+                    System.out.println("Not a command");
+                    break;
+            }
+        }
+
     }
 
 
@@ -131,12 +131,13 @@ public class Main {
      * @return returns boolean if the passwords match
      * @throws IOException IOException if file is not found.
      */
-    private static boolean readMasterPass(String masterPass) throws IOException {
+    private static boolean readMasterPass(String masterPass) throws IOException, NoSuchAlgorithmException {
         Path path = Paths.get("master_passwd");
         byte[] data = Files.readAllBytes(path);
         byte[] salt = Arrays.copyOf(data, 32);
-        byte[] hash = Arrays.copyOfRange(data, 32, 64);
+        byte[] hash = Arrays.copyOfRange(data, 32, data.length);
         return checkMasterPassword(masterPass, salt, hash);
+
     }
 
     /**
@@ -173,13 +174,20 @@ public class Main {
      * @return New hashed key
      * @throws UnsupportedEncodingException Thrown if SHA256 isn't supported
      */
-    private static byte[] setMasterPass(String mastPass, byte[] salt) throws UnsupportedEncodingException {
-        int hashBytes = 32;
+    private static byte[] setMasterPass(String mastPass, byte[] salt) throws IOException, NoSuchAlgorithmException {
+        /*int hashBytes = 32;
         //Create new hash with SHA256
         PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
         kdf.init(mastPass.getBytes("UTF-8"), salt, 1000);
         //Returns the hased value
-        return ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();
+        return ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();*/
+        MessageDigest md = MessageDigest.getInstance("SHA-512");
+        ByteArrayOutputStream bout = new ByteArrayOutputStream();
+        bout.write(salt);
+        bout.write(mastPass.getBytes());
+
+        return md.digest(bout.toByteArray());
+
     }
 
     /**
@@ -191,14 +199,25 @@ public class Main {
      * @return Boolean comparing the values of the hashedToCheck and read passwords
      * @throws UnsupportedEncodingException Thrown if SHA256 is not supported
      */
-    private static boolean checkMasterPassword(String password, byte[] salt, byte[] readPassword) throws UnsupportedEncodingException {
+    private static boolean checkMasterPassword(String password, byte[] salt, byte[] readPassword) throws IOException, NoSuchAlgorithmException {
         int hashBytes = 32;
         //Check file, pass in salt and run the check
         // to check a password, given the known previous salt and hash:
+
+        /*
         PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
         kdf.init(password.getBytes("UTF-8"), salt, 1000);
 
         byte[] hashToCheck = ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();
+        */
+
+
+        MessageDigest md = MessageDigest.getInstance("SHA-512");
+        ByteArrayOutputStream bout = new ByteArrayOutputStream();
+        bout.write(salt);
+        bout.write(password.getBytes());
+        byte[] hashToCheck = md.digest(bout.toByteArray());
+
         // if the bytes of hashToCheck don't match the bytes of readPassword
         // that means the password is invalid
         return Arrays.equals(readPassword, hashToCheck);
@@ -228,7 +247,7 @@ public class Main {
                 System.out.println("Error: Password File already exists.");
             }
 
-        } catch (IOException e) {
+        } catch (IOException | NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
     }
