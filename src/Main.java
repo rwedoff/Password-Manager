@@ -1,27 +1,24 @@
-import org.bouncycastle.crypto.digests.SHA256Digest;
+import org.bouncycastle.crypto.digests.SHA512Digest;
 import org.bouncycastle.crypto.generators.PKCS12ParametersGenerator;
+import org.bouncycastle.crypto.macs.HMac;
 import org.bouncycastle.crypto.params.KeyParameter;
-import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
 
+import javax.crypto.*;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.*;
-import java.util.*;
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-
-import javax.crypto.Cipher;
-import javax.crypto.CipherInputStream;
-import javax.crypto.CipherOutputStream;
-import javax.crypto.NoSuchPaddingException;
-import javax.crypto.spec.IvParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Scanner;
 
 public class Main {
     private static HashMap<String, Entry> entryList = new HashMap<>();
+    private static byte[] integrity;
+    private static boolean firstRun = false;
 
     public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
         //Todo Figure out how to run from commandline
@@ -35,12 +32,15 @@ public class Main {
         System.out.println("Password Manager:");
         File master_passwd_file = new File("master_passwd");
         File passwd_file = new File("passwd_file");
+
+        String initPass = null;
         if (!(master_passwd_file.exists() && passwd_file.exists())) {
             //Registers a new user
             System.out.println("New User, please enter in a Master Password:");
             Scanner scan = new Scanner(System.in);
-            String mastPass = scan.nextLine();
-            createFiles(mastPass);
+            initPass = scan.nextLine();
+            createFiles(initPass);
+            firstRun = true;
         }
         //Checks given password with a saved password
         System.out.println("Welcome! Please enter your password:");
@@ -55,16 +55,18 @@ public class Main {
                 System.exit(0);
             }
         }
-        //TODO check ingerity here
+
         try {
             decryptFile(mastPass);
         } catch (NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException | InvalidAlgorithmParameterException | InvalidKeyException e) {
             e.printStackTrace();
         }
 
+        checkIntegrity(mastPass);
+
         //Main Menu code
         while (true) {
-            System.out.println("\n\n\n");
+            System.out.println("\n\n");
             System.out.println("Welcome User! Type in a command to begin.");
             System.out.println("1: Check Integrity");
             System.out.println("2: Register Account");
@@ -75,7 +77,7 @@ public class Main {
             int option = scan.nextInt();
             switch (option) {
                 case 1:
-                    System.out.println("Check Integrity TODO");
+                    checkIntegrity(mastPass);
                     break;
                 case 2:
                     addAccount();
@@ -104,6 +106,14 @@ public class Main {
                     System.out.println("Printing List");
                     printEntryList();
                     break;
+                //TODO remove for debug only, saves without changing integrity
+                case 8:
+                    try {
+                        encryptFileNoIntegrity(mastPass);
+                    } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
+                        e.printStackTrace();
+                    }
+                    break;
                 default:
                     System.out.println("Not a command");
                     break;
@@ -112,8 +122,70 @@ public class Main {
 
     }
 
+    //TODO used for case 8, saving with no integrity
+    private static void encryptFileNoIntegrity(String mastPass) throws NoSuchPaddingException, NoSuchAlgorithmException, NoSuchProviderException, IOException, InvalidAlgorithmParameterException, InvalidKeyException {
+        SecureRandom rng = new SecureRandom();
+        byte[] ivBytes = rng.generateSeed(16);
+
+        byte[] keyBytes = generateKeyBytes(mastPass, ivBytes);
+        SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
+        IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
+        Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
+
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+
+        for (String mapKey : entryList.keySet()) {
+            input.write(Utils.toByteArray(entryList.get(mapKey).toString()));
+        }
+        // encryption pass
+        cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
+
+        ByteArrayInputStream bIn = new ByteArrayInputStream(input.toByteArray());
+        CipherInputStream cIn = new CipherInputStream(bIn, cipher);
+        ByteArrayOutputStream bOut = new ByteArrayOutputStream();
+        bOut.write(ivBytes);
+        int ch;
+        while ((ch = cIn.read()) >= 0) {
+            bOut.write(ch);
+        }
+
+        try (OutputStream outputStream = new FileOutputStream("passwd_file")) {
+            bOut.writeTo(outputStream);
+        }
+    }
+
+    private static void checkIntegrity(String masterPassword) throws NoSuchAlgorithmException, IOException {
+        byte[] resBuf = createIntegrityHash(masterPassword);
+        if (firstRun) {
+            System.out.println("Nothing has been saved on the first run");
+            return;
+        }
+        if (!Arrays.equals(resBuf, integrity)) {
+            System.out.println("INTEGRITY CHECK OF PASSWORD FILE FAILED!");
+        }
+    }
+
+    private static byte[] createIntegrityHash(String masterPassword) throws IOException {
+        if (new File("passwd_file").exists()) {
+            Path path = Paths.get("passwd_file");
+            byte[] data = Files.readAllBytes(path);
+            byte[] ivBytes = Arrays.copyOf(data, 16);
+            SHA512Digest messageDigest = new SHA512Digest();
+            HMac hmac = new HMac(messageDigest);
+            byte[] resBuf = new byte[hmac.getMacSize()];
+
+            byte[] keyBytes = generateKeyBytes(masterPassword, ivBytes);
+
+            hmac.init(new KeyParameter(keyBytes));
+            hmac.update(data, 0, data.length);
+            hmac.doFinal(resBuf, 0);
+            return resBuf;
+        }
+        return null;
+    }
+
     /**
-     * Generates a key for encryption file used PKCS12 and SHA-256Digest.
+     * Generates a key for encryption file used PKCS12 and SHA-512Digest.
      *
      * @param masterPass String password that is entered from input
      * @param salt       RandomIV
@@ -122,7 +194,8 @@ public class Main {
      */
     private static byte[] generateKeyBytes(String masterPass, byte[] salt) throws UnsupportedEncodingException {
         int hashBytes = 32;
-        PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
+        SHA512Digest messageDigest = new SHA512Digest();
+        PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(messageDigest);
         kdf.init(masterPass.getBytes("UTF-8"), salt, 1000);
         //Sets the hased value
         return ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();
@@ -136,10 +209,14 @@ public class Main {
      * @throws IOException IOException if file is not found.
      */
     private static boolean readMasterPass(String masterPass) throws IOException, NoSuchAlgorithmException {
+        if (firstRun) {
+            return true;
+        }
         Path path = Paths.get("master_passwd");
         byte[] data = Files.readAllBytes(path);
-        byte[] salt = Arrays.copyOf(data, 32);
-        byte[] hash = Arrays.copyOfRange(data, 32, data.length);
+        integrity = Arrays.copyOf(data, 64);
+        byte[] salt = Arrays.copyOfRange(data, 64, 96);
+        byte[] hash = Arrays.copyOfRange(data, 96, data.length);
         return checkMasterPassword(masterPass, salt, hash);
 
     }
@@ -152,7 +229,7 @@ public class Main {
      * @throws IOException Thrown if file doesn't exist
      */
     //TODO add integrity check write code to here
-    private static void writeMasterPass(byte[] hashedKey, byte[] salt) throws IOException {
+    private static void writeMasterPassHelper(byte[] hashedKey, byte[] salt, byte[] integrity) throws IOException {
         FileOutputStream fos = null;
         try {
             fos = new FileOutputStream("master_passwd");
@@ -160,11 +237,15 @@ public class Main {
             e.printStackTrace();
         }
 
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream(hashedKey.length + salt.length);
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        if (integrity == null) {
+            integrity = new byte[128];
+            Arrays.fill(integrity, (byte) 1);
+        }
+        outputStream.write(integrity);
         outputStream.write(salt);
         outputStream.write(hashedKey);
-
-        byte outPut[] = outputStream.toByteArray();
+        byte[] outPut = outputStream.toByteArray();
         assert fos != null;
         fos.write(outPut);
         fos.close();
@@ -174,19 +255,17 @@ public class Main {
      * Takes in a random salt and master password and hashes it with SHA256
      *
      * @param mastPass Given master password
-     * @param salt     Random salt 256-bits
+     * @param salt     Random salt 512-bits
      * @return New hashed key
-     * @throws UnsupportedEncodingException Thrown if SHA256 isn't supported
+     * @throws UnsupportedEncodingException Thrown if SHA512 isn't supported
      */
     private static byte[] setMasterPass(String mastPass, byte[] salt) throws IOException, NoSuchAlgorithmException {
-        //Create new hash with SHA256
+        //Create new hash with SHA512
         MessageDigest md = MessageDigest.getInstance("SHA-512");
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         bout.write(salt);
         bout.write(mastPass.getBytes());
-
         return md.digest(bout.toByteArray());
-
     }
 
     /**
@@ -196,7 +275,7 @@ public class Main {
      * @param salt         Salt extracted from master_passwd file
      * @param readPassword Read password extracted from master_passwd file
      * @return Boolean comparing the values of the hashedToCheck and read passwords
-     * @throws UnsupportedEncodingException Thrown if SHA256 is not supported
+     * @throws UnsupportedEncodingException Thrown if SHA512 is not supported
      */
     private static boolean checkMasterPassword(String password, byte[] salt, byte[] readPassword) throws IOException, NoSuchAlgorithmException {
         int hashBytes = 32;
@@ -226,10 +305,7 @@ public class Main {
             File passwd_file = new File("passwd_file");
 
             if (master__passwd_file.createNewFile()) {
-                int seedBytes = 32;
-                SecureRandom rng = new SecureRandom();
-                byte[] salt = rng.generateSeed(seedBytes);
-                writeMasterPass(setMasterPass(mastPass, salt), salt);
+                writeMasterPass(mastPass);
             } else {
                 System.out.println("Error: Master Password File already exists.");
             }
@@ -237,6 +313,17 @@ public class Main {
                 System.out.println("Error: Password File already exists.");
             }
 
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void writeMasterPass(String mastPass) {
+        int seedBytes = 32;
+        SecureRandom rng = new SecureRandom();
+        byte[] salt = rng.generateSeed(seedBytes);
+        try {
+            writeMasterPassHelper(setMasterPass(mastPass, salt), salt, createIntegrityHash(mastPass));
         } catch (IOException | NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
@@ -257,7 +344,7 @@ public class Main {
         SecureRandom rng = new SecureRandom();
         byte[] ivBytes = rng.generateSeed(16);
 
-        byte[] keyBytes = generateKeyBytes(masterPass, ivBytes);
+        byte[] keyBytes = generateKeyBytes(masterPass, ivBytes);  //PKCS generated
         SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
         IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
         Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
@@ -282,6 +369,8 @@ public class Main {
         try (OutputStream outputStream = new FileOutputStream("passwd_file")) {
             bOut.writeTo(outputStream);
         }
+
+        writeMasterPass(masterPass);
     }
 
     /**
@@ -305,8 +394,8 @@ public class Main {
         if (data.length > 0) {
 
             byte[] ivBytes = Arrays.copyOf(data, 16);
-
-            PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
+            SHA512Digest messageDigest = new SHA512Digest();
+            PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(messageDigest);
             kdf.init(password.getBytes("UTF-8"), ivBytes, 1000);
 
             int hashBytes = 32;
@@ -497,7 +586,188 @@ public class Main {
             sb.append(password);
             return sb.toString();
         }
+    }
+
+
+    /**
+     * Static utility methods.
+     */
+    private static class Utils {
+        /**
+         * Return a string of length len made up of blanks.
+         *
+         * @param len the length of the output String.
+         * @return the string of blanks.
+         */
+        public static String makeBlankString(
+                int len) {
+            char[] buf = new char[len];
+
+            for (int i = 0; i != buf.length; i++) {
+                buf[i] = ' ';
+            }
+
+            return new String(buf);
+        }
+
+        private static String digits = "0123456789abcdef";
+
+        /**
+         * Return length many bytes of the passed in byte array as a hex string.
+         *
+         * @param data   the bytes to be converted.
+         * @param length the number of bytes in the data block to be converted.
+         * @return a hex representation of length bytes of data.
+         */
+        public static String toHex(byte[] data, int length) {
+            StringBuffer buf = new StringBuffer();
+
+            for (int i = 0; i != length; i++) {
+                int v = data[i] & 0xff;
+
+                buf.append(digits.charAt(v >> 4));
+                buf.append(digits.charAt(v & 0xf));
+            }
+
+            return buf.toString();
+        }
+
+        /**
+         * Return the passed in byte array as a hex string.
+         *
+         * @param data the bytes to be converted.
+         * @return a hex representation of data.
+         */
+        public static String toHex(byte[] data) {
+            return toHex(data, data.length);
+        }
+
+        /**
+         * Create a key for use with AES.
+         *
+         * @param bitLength
+         * @param random
+         * @return an AES key.
+         * @throws NoSuchAlgorithmException
+         * @throws NoSuchProviderException
+         */
+        public static SecretKey createKeyForAES(
+                int bitLength,
+                SecureRandom random)
+                throws NoSuchAlgorithmException, NoSuchProviderException {
+            KeyGenerator generator = KeyGenerator.getInstance("AES", "BC");
+
+            generator.init(256, random);
+
+            return generator.generateKey();
+        }
+
+        /**
+         * Create an IV suitable for using with AES in CTR mode.
+         * <p>
+         * The IV will be composed of 4 bytes of message number,
+         * 4 bytes of random data, and a counter of 8 bytes.
+         *
+         * @param messageNumber the number of the message.
+         * @param random        a source of randomness
+         * @return an initialised IvParameterSpec
+         */
+        public static IvParameterSpec createCtrIvForAES(
+                int messageNumber,
+                SecureRandom random) {
+            byte[] ivBytes = new byte[16];
+
+            // initially randomize
+
+            random.nextBytes(ivBytes);
+
+            // set the message number bytes
+
+            ivBytes[0] = (byte) (messageNumber >> 24);
+            ivBytes[1] = (byte) (messageNumber >> 16);
+            ivBytes[2] = (byte) (messageNumber >> 8);
+            ivBytes[3] = (byte) (messageNumber >> 0);
+
+            // set the counter bytes to 1
+
+            for (int i = 0; i != 7; i++) {
+                ivBytes[8 + i] = 0;
+            }
+
+            ivBytes[15] = 1;
+
+            return new IvParameterSpec(ivBytes);
+        }
+
+        /**
+         * Convert a byte array of 8 bit characters into a String.
+         *
+         * @param bytes  the array containing the characters
+         * @param length the number of bytes to process
+         * @return a String representation of bytes
+         */
+        public static String toString(
+                byte[] bytes,
+                int length) {
+            char[] chars = new char[length];
+
+            for (int i = 0; i != chars.length; i++) {
+                chars[i] = (char) (bytes[i] & 0xff);
+            }
+
+            return new String(chars);
+        }
+
+        public static String toStringRange(byte[] bytes, int start, int end) {
+            char[] chars = new char[end - start];
+            int j = 0;
+            for (int i = start; i != end; i++) {
+                chars[j] = (char) (bytes[i] & 0xff);
+                j++;
+            }
+
+            return new String(chars);
+        }
+
+        /**
+         * Convert a byte array of 8 bit characters into a String.
+         *
+         * @param bytes the array containing the characters
+         * @return a String representation of bytes
+         */
+        public static String toString(
+                byte[] bytes) {
+            return toString(bytes, bytes.length);
+        }
+
+        /**
+         * Convert the passed in String to a byte array by
+         * taking the bottom 8 bits of each character it contains.
+         *
+         * @param string the string to be converted
+         * @return a byte array representation
+         */
+        static byte[] toByteArray(
+                String string) {
+            byte[] bytes = new byte[string.length()];
+            char[] chars = string.toCharArray();
+
+            for (int i = 0; i != chars.length; i++) {
+                bytes[i] = (byte) chars[i];
+            }
+
+            return bytes;
+        }
+
+        static String paddString(String t) {
+            return String.format("%-" + 80 + "s", t).replace(' ', '!');
+        }
+
+        static String removePadd(String t) {
+            return t.substring(0, t.indexOf("!"));
+        }
 
 
     }
+
 }
