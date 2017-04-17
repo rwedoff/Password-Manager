@@ -1,6 +1,7 @@
 import org.bouncycastle.crypto.digests.SHA256Digest;
 import org.bouncycastle.crypto.generators.PKCS12ParametersGenerator;
 import org.bouncycastle.crypto.params.KeyParameter;
+import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -22,16 +23,6 @@ import javax.crypto.spec.SecretKeySpec;
 public class Main {
     private static HashMap<String, Entry> entryList = new HashMap<>();
 
-    //TODO change to random iv and legit key.
-    static byte[] ivBytes = new byte[]{
-            0x00, 0x01, 0x02, 0x03, 0x00, 0x01, 0x02, 0x03,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
-    static byte[] keyBytes = new byte[]{
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17};
-
-
     public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
         //Todo Figure out how to run from commandline
         //Configuration steps:  Add Bouncy Castle jars to project, test if we actually need both.
@@ -41,7 +32,7 @@ public class Main {
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
 
         //Checks if files already exist, if not, create the files, if yes, ask for password.
-        System.out.println("Password Manager 1.0");
+        System.out.println("Password Manager:");
         File master_passwd_file = new File("master_passwd");
         File passwd_file = new File("passwd_file");
         if (!(master_passwd_file.exists() && passwd_file.exists())) {
@@ -49,7 +40,6 @@ public class Main {
             System.out.println("New User, please enter in a Master Password:");
             Scanner scan = new Scanner(System.in);
             String mastPass = scan.nextLine();
-            System.out.println(mastPass);
             createFiles(mastPass);
         }
         //Checks given password with a saved password
@@ -67,7 +57,7 @@ public class Main {
         }
         //TODO check ingerity here
         try {
-            decryptFile(keyBytes, ivBytes);
+            decryptFile(mastPass);
         } catch (NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException | InvalidAlgorithmParameterException | InvalidKeyException e) {
             e.printStackTrace();
         }
@@ -94,7 +84,6 @@ public class Main {
                     deleteAccount();
                     break;
                 case 4:
-                    System.out.println("Change Account TODO");
                     changeAccount();
                     break;
                 case 5:
@@ -103,7 +92,7 @@ public class Main {
                 case 0:
                     System.out.println("Saving...");
                     try {
-                        encryptFile(keyBytes, ivBytes);
+                        encryptFile(mastPass);
                     } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
                         e.printStackTrace();
                     }
@@ -123,6 +112,21 @@ public class Main {
 
     }
 
+    /**
+     * Generates a key for encryption file used PKCS12 and SHA-256Digest.
+     *
+     * @param masterPass String password that is entered from input
+     * @param salt       RandomIV
+     * @return Generated key
+     * @throws UnsupportedEncodingException Required for PKCS12
+     */
+    private static byte[] generateKeyBytes(String masterPass, byte[] salt) throws UnsupportedEncodingException {
+        int hashBytes = 32;
+        PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
+        kdf.init(masterPass.getBytes("UTF-8"), salt, 1000);
+        //Sets the hased value
+        return ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();
+    }
 
     /**
      * Reads the master_passwd file and checks if it matches the given password
@@ -175,12 +179,7 @@ public class Main {
      * @throws UnsupportedEncodingException Thrown if SHA256 isn't supported
      */
     private static byte[] setMasterPass(String mastPass, byte[] salt) throws IOException, NoSuchAlgorithmException {
-        /*int hashBytes = 32;
         //Create new hash with SHA256
-        PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
-        kdf.init(mastPass.getBytes("UTF-8"), salt, 1000);
-        //Returns the hased value
-        return ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();*/
         MessageDigest md = MessageDigest.getInstance("SHA-512");
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         bout.write(salt);
@@ -203,15 +202,6 @@ public class Main {
         int hashBytes = 32;
         //Check file, pass in salt and run the check
         // to check a password, given the known previous salt and hash:
-
-        /*
-        PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
-        kdf.init(password.getBytes("UTF-8"), salt, 1000);
-
-        byte[] hashToCheck = ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();
-        */
-
-
         MessageDigest md = MessageDigest.getInstance("SHA-512");
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         bout.write(salt);
@@ -255,8 +245,7 @@ public class Main {
     /**
      * Given the static EntryList, this encrypts the whole file and writes to passwd_file
      *
-     * @param keyBytes Key to encrypt
-     * @param ivBytes  Random IV
+     * @param masterPass Password to generate key
      * @throws InvalidAlgorithmParameterException Bouncy Castle required
      * @throws InvalidKeyException                Bouncy Castle required
      * @throws NoSuchPaddingException             Bouncy Castle required
@@ -264,14 +253,11 @@ public class Main {
      * @throws NoSuchProviderException            Bouncy Castle required
      * @throws IOException                        Caught if passwd_file can't be written to.
      */
-    private static void encryptFile(byte[] keyBytes, byte[] ivBytes) throws InvalidAlgorithmParameterException, InvalidKeyException, NoSuchPaddingException, NoSuchAlgorithmException, NoSuchProviderException, IOException {
-        //TODO think about, is the key just the masterPass file?  Should the masterpass file be unencrypted?
-        //Todo add a key and iv file
-        //Todo where do we save the IV, master pass? In plaintext in passwd_file?
-        //TODO should we decrypt first and then re-encrypt with the new record (auto saving)
-        //TODO run encryption after every operation?
-        //TODO What do we do if there are multiple accounts with the same domain? HashMap doesn't allow duplicates
+    private static void encryptFile(String masterPass) throws InvalidAlgorithmParameterException, InvalidKeyException, NoSuchPaddingException, NoSuchAlgorithmException, NoSuchProviderException, IOException {
+        SecureRandom rng = new SecureRandom();
+        byte[] ivBytes = rng.generateSeed(16);
 
+        byte[] keyBytes = generateKeyBytes(masterPass, ivBytes);
         SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
         IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
         Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
@@ -281,22 +267,17 @@ public class Main {
         for (String mapKey : entryList.keySet()) {
             input.write(Utils.toByteArray(entryList.get(mapKey).toString()));
         }
-
         // encryption pass
         cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
 
         ByteArrayInputStream bIn = new ByteArrayInputStream(input.toByteArray());
         CipherInputStream cIn = new CipherInputStream(bIn, cipher);
         ByteArrayOutputStream bOut = new ByteArrayOutputStream();
-
+        bOut.write(ivBytes);
         int ch;
         while ((ch = cIn.read()) >= 0) {
             bOut.write(ch);
         }
-
-        byte[] cipherText = bOut.toByteArray();
-
-        //System.out.println("cipher: " + Utils.toHex(cipherText));
 
         try (OutputStream outputStream = new FileOutputStream("passwd_file")) {
             bOut.writeTo(outputStream);
@@ -306,8 +287,7 @@ public class Main {
     /**
      * Decrypts the whole file and builds Entry objects
      *
-     * @param keyBytes Key to encrypt the file
-     * @param ivBytes  Random IV used for encryption
+     * @param password string master password
      * @throws IOException                        Bouncy Castle required
      * @throws NoSuchPaddingException             Bouncy Castle required
      * @throws NoSuchAlgorithmException           Bouncy Castle required
@@ -316,33 +296,44 @@ public class Main {
      * @throws InvalidKeyException                Thrown if passwd_file can't be read.
      * @see Entry
      */
-    private static void decryptFile(byte[] keyBytes, byte[] ivBytes) throws IOException, NoSuchPaddingException, NoSuchAlgorithmException, NoSuchProviderException, InvalidAlgorithmParameterException, InvalidKeyException {
+    private static void decryptFile(String password) throws IOException, NoSuchPaddingException, NoSuchAlgorithmException, NoSuchProviderException, InvalidAlgorithmParameterException, InvalidKeyException {
         entryList.clear();
         //Decrypt the whole password file
         Path path = Paths.get("passwd_file");
         byte[] data = Files.readAllBytes(path);
 
-        SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
-        IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
-        Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
+        if (data.length > 0) {
 
-        cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
-        ByteArrayOutputStream bOut = new ByteArrayOutputStream();
+            byte[] ivBytes = Arrays.copyOf(data, 16);
 
-        CipherOutputStream cOut = new CipherOutputStream(bOut, cipher);
+            PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(new SHA256Digest());
+            kdf.init(password.getBytes("UTF-8"), ivBytes, 1000);
 
-        cOut.write(data);
+            int hashBytes = 32;
+            byte[] keyBytes = ((KeyParameter) kdf.generateDerivedMacParameters(8 * hashBytes)).getKey();
 
-        cOut.close();
+            SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
+            IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
+            Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding", "BC");
 
-        byte[] fileBytes = bOut.toByteArray();
+            cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
+            ByteArrayOutputStream bOut = new ByteArrayOutputStream();
 
-        int fileSize = fileBytes.length;
-        int j = 0;
-        for (int i = 0; i < fileSize; i++) {
-            if (i % 240 == 0) {
-                j += 240;
-                entryList.put(Utils.toStringRange(fileBytes, i, j - 160), new Entry(Utils.toStringRange(fileBytes, i, j)));
+            CipherOutputStream cOut = new CipherOutputStream(bOut, cipher);
+
+            cOut.write(Arrays.copyOfRange(data, 16, data.length));
+
+            cOut.close();
+
+            byte[] fileBytes = bOut.toByteArray();
+
+            int fileSize = fileBytes.length;
+            int j = 0;
+            for (int i = 0; i < fileSize; i++) {
+                if (i % 240 == 0) {
+                    j += 240;
+                    entryList.put(Utils.toStringRange(fileBytes, i, j - 160), new Entry(Utils.toStringRange(fileBytes, i, j)));
+                }
             }
         }
     }
@@ -412,7 +403,10 @@ public class Main {
         System.out.println("username " + Utils.removePadd(entry.getUser()) + " " + "password " + Utils.removePadd(entry.getPassword()));
     }
 
-
+    /**
+     * Changes the account information as an entry object.
+     * Can replace the value with the Domain as the key of the entry.
+     */
     private static void changeAccount() {
         Scanner scanner = new Scanner(System.in);
         System.out.println("Enter Account Name:");
@@ -422,18 +416,20 @@ public class Main {
             System.out.println("USER ACCOUNT DOES NOT EXIST!");
             return;
         }
-        System.out.println("Enter Username for Account:");
+        System.out.println("Enter New Username for Account:");
         String userName = scanner.nextLine();
-        System.out.println("Enter Old Password for Account:");
-        String oldPassword = scanner.nextLine();
         System.out.println("Enter New Password for Account:");
         String newPassword = scanner.nextLine();
 
         entryList.replace(Utils.paddString(account), new Entry(account, userName, newPassword));
     }
 
+    /**
+     * TODO
+     * Debug method only. Used to print all entries in memory.
+     */
     private static void printEntryList() {
-        //Debug used for seeing the whole file todo
+        //Debug used for seeing the whole file
         for (String mapKey : entryList.keySet()) {
             System.out.println(entryList.get(mapKey));
         }
