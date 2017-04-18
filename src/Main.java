@@ -22,7 +22,7 @@ public class Main {
 
     public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
         //Todo Figure out how to run from commandline
-        //Configuration steps:  Add Bouncy Castle jars to project, test if we actually need both.
+        //Configuration steps:  Add Bouncy Castle jars to project, test if we actually need both.  todo
         //Check Java security to make sure the JRE can do some security magic... (Potential Error: Invalid Key Length)
 
         //Required for Bouncy Castle Encryption
@@ -40,7 +40,13 @@ public class Main {
             Scanner scan = new Scanner(System.in);
             initPass = scan.nextLine();
             createFiles(initPass);
-            firstRun = true;
+            try {
+                encryptFile(initPass);
+            } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchProviderException | NoSuchPaddingException e) {
+                e.printStackTrace();
+            }
+            System.exit(0);
+
         }
         //Checks given password with a saved password
         System.out.println("Welcome! Please enter your password:");
@@ -56,13 +62,13 @@ public class Main {
             }
         }
 
+        checkIntegrityBegin(mastPass);
+
         try {
             decryptFile(mastPass);
         } catch (NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException | InvalidAlgorithmParameterException | InvalidKeyException e) {
             e.printStackTrace();
         }
-
-        checkIntegrity(mastPass);
 
         //Main Menu code
         while (true) {
@@ -154,14 +160,27 @@ public class Main {
         }
     }
 
-    private static void checkIntegrity(String masterPassword) throws NoSuchAlgorithmException, IOException {
+    private static boolean checkIntegrityHelper(String masterPassword) throws NoSuchAlgorithmException, IOException {
         byte[] resBuf = createIntegrityHash(masterPassword);
         if (firstRun) {
             System.out.println("Nothing has been saved on the first run");
-            return;
+            return true;
         }
-        if (!Arrays.equals(resBuf, integrity)) {
+        return Arrays.equals(resBuf, integrity);
+    }
+
+    private static void checkIntegrity(String masterPasssword) throws IOException, NoSuchAlgorithmException {
+        if (checkIntegrityHelper(masterPasssword)) {
+            System.out.println("PASSED!");
+        } else {
+            System.out.println("FAILED!");
+        }
+    }
+
+    private static void checkIntegrityBegin(String masterPass) throws IOException, NoSuchAlgorithmException {
+        if (!checkIntegrityHelper(masterPass)) {
             System.out.println("INTEGRITY CHECK OF PASSWORD FILE FAILED!");
+            System.exit(0);
         }
     }
 
