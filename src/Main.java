@@ -1,3 +1,4 @@
+import com.sun.xml.internal.bind.v2.TODO;
 import org.bouncycastle.crypto.digests.SHA512Digest;
 import org.bouncycastle.crypto.generators.PKCS12ParametersGenerator;
 import org.bouncycastle.crypto.macs.HMac;
@@ -18,6 +19,7 @@ import java.util.Scanner;
 public class Main {
     private static HashMap<String, Entry> entryList = new HashMap<>();
     private static byte[] integrity;
+    private static String padChar = "!";
     private static boolean firstRun = false;
 
     public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
@@ -80,6 +82,7 @@ public class Main {
             System.out.println("4: Change Account");
             System.out.println("5: Get Password");
             System.out.println("0: Save/Exit");
+            //TODO, avoid crashing the program by catching strings as well
             int option = scan.nextInt();
             switch (option) {
                 case 1:
@@ -161,6 +164,7 @@ public class Main {
     }
 
     private static boolean checkIntegrityHelper(String masterPassword) throws NoSuchAlgorithmException, IOException {
+        //TODO REMOVE all of this first run stuff
         if (firstRun) {
             System.out.println("Nothing has been saved on the first run");
             return true;
@@ -199,7 +203,7 @@ public class Main {
         hmac.init(new KeyParameter(keyBytes));
         hmac.update(data, 0, data.length);
         hmac.doFinal(resBuf, 0);
-        System.out.println(Utils.toHex(resBuf));
+        // System.out.println(Utils.toHex(resBuf));
         return resBuf;
 
     }
@@ -453,12 +457,25 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
         System.out.println("Account Name:");
         String accountName = scanner.nextLine();
+        while(isIllegal(accountName)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            accountName = scanner.nextLine();
+        }
         System.out.println("User Name:");
         String userName = scanner.nextLine();
+        while(isIllegal(userName)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            userName = scanner.nextLine();
+        }
         System.out.println("Password");
         String password = scanner.nextLine();
+        while(isIllegal(password)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            password = scanner.nextLine();
+        }
 
         Entry e = getAccountHelper(accountName);
+        //TODO CONSIDER moving this to right after accountName entry
         if (e != null && !(e.getDomain().equals(accountName) && e.getUser().equals(userName))) {
             System.out.println("USER ACCOUNT ALREADY EXISTS");
             return;
@@ -484,6 +501,10 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
         System.out.println("Enter Account Name to Delete:");
         String account = scanner.nextLine();
+        while(isIllegal(account)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            account = scanner.nextLine();
+        }
         Entry entry = getAccountHelper(account);
         if (entry == null) {
             System.out.println("USER ACCOUNT DOES NOT EXIST!");
@@ -501,6 +522,10 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
         System.out.println("Enter Account Name:");
         String account = scanner.nextLine();
+        while(isIllegal(account)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            account = scanner.nextLine();
+        }
         Entry entry = getAccountHelper(account);
         if (entry == null) {
             System.out.println("USER ACCOUNT DOES NOT EXIST!");
@@ -517,6 +542,10 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
         System.out.println("Enter Account Name:");
         String account = scanner.nextLine();
+        while(isIllegal(account)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            account = scanner.nextLine();
+        }
         Entry entry = getAccountHelper(account);
         if (entry == null) {
             System.out.println("USER ACCOUNT DOES NOT EXIST!");
@@ -524,8 +553,16 @@ public class Main {
         }
         System.out.println("Enter New Username for Account:");
         String userName = scanner.nextLine();
+        while(isIllegal(userName)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            userName = scanner.nextLine();
+        }
         System.out.println("Enter New Password for Account:");
         String newPassword = scanner.nextLine();
+        while(isIllegal(newPassword)){
+            System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
+            newPassword = scanner.nextLine();
+        }
 
         entryList.replace(Utils.paddString(account), new Entry(account, userName, newPassword));
     }
@@ -540,6 +577,19 @@ public class Main {
             System.out.println(entryList.get(mapKey));
         }
     }
+
+
+    /**
+     * method checks whether an account contains an illegal character
+     * as of writing, the only illegal character is '!' because it's out padding
+     * returns boolean true if the user is using it
+     */
+
+    private static boolean isIllegal(String option){
+        return option.contains(padChar);
+    }
+
+
 
     /**
      * Inner class representing the Entries of the password manager
