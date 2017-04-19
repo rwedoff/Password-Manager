@@ -22,7 +22,7 @@ public class Main {
 
     public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
         //Todo Figure out how to run from commandline
-        //Configuration steps:  Add Bouncy Castle jars to project, test if we actually need both.
+        //Configuration steps:  Add Bouncy Castle jars to project, test if we actually need both.  todo
         //Check Java security to make sure the JRE can do some security magic... (Potential Error: Invalid Key Length)
 
         //Required for Bouncy Castle Encryption
@@ -40,7 +40,13 @@ public class Main {
             Scanner scan = new Scanner(System.in);
             initPass = scan.nextLine();
             createFiles(initPass);
-            firstRun = true;
+            try {
+                encryptFile(initPass);
+            } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchProviderException | NoSuchPaddingException e) {
+                e.printStackTrace();
+            }
+            System.exit(0);
+
         }
         //Checks given password with a saved password
         System.out.println("Welcome! Please enter your password:");
@@ -56,13 +62,13 @@ public class Main {
             }
         }
 
+        checkIntegrityBegin(mastPass);
+
         try {
             decryptFile(mastPass);
         } catch (NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException | InvalidAlgorithmParameterException | InvalidKeyException e) {
             e.printStackTrace();
         }
-
-        checkIntegrity(mastPass);
 
         //Main Menu code
         while (true) {
@@ -154,34 +160,48 @@ public class Main {
         }
     }
 
-    private static void checkIntegrity(String masterPassword) throws NoSuchAlgorithmException, IOException {
-        byte[] resBuf = createIntegrityHash(masterPassword);
+    private static boolean checkIntegrityHelper(String masterPassword) throws NoSuchAlgorithmException, IOException {
         if (firstRun) {
             System.out.println("Nothing has been saved on the first run");
-            return;
+            return true;
         }
-        if (!Arrays.equals(resBuf, integrity)) {
-            System.out.println("INTEGRITY CHECK OF PASSWORD FILE FAILED!");
+        Path path = Paths.get("passwd_file");
+        byte[] data = Files.readAllBytes(path);
+        integrity = Arrays.copyOf(data, 64);
+        byte[] ivBytes = Arrays.copyOfRange(data, 64, 80);
+        byte[] cipherText = Arrays.copyOfRange(data, 80, data.length);
+        byte[] resBuf = createIntegrityHash(masterPassword, cipherText, ivBytes);
+        return Arrays.equals(resBuf, integrity);
+    }
+
+    private static void checkIntegrity(String masterPasssword) throws IOException, NoSuchAlgorithmException {
+        if (checkIntegrityHelper(masterPasssword)) {
+            System.out.println("PASSED!");
+        } else {
+            System.out.println("FAILED!");
         }
     }
 
-    private static byte[] createIntegrityHash(String masterPassword) throws IOException {
-        if (new File("passwd_file").exists()) {
-            Path path = Paths.get("passwd_file");
-            byte[] data = Files.readAllBytes(path);
-            byte[] ivBytes = Arrays.copyOf(data, 16);
-            SHA512Digest messageDigest = new SHA512Digest();
-            HMac hmac = new HMac(messageDigest);
-            byte[] resBuf = new byte[hmac.getMacSize()];
-
-            byte[] keyBytes = generateKeyBytes(masterPassword, ivBytes);
-
-            hmac.init(new KeyParameter(keyBytes));
-            hmac.update(data, 0, data.length);
-            hmac.doFinal(resBuf, 0);
-            return resBuf;
+    private static void checkIntegrityBegin(String masterPass) throws IOException, NoSuchAlgorithmException {
+        if (!checkIntegrityHelper(masterPass)) {
+            System.out.println("INTEGRITY CHECK OF PASSWORD FILE FAILED!");
+            System.exit(0);
         }
-        return null;
+    }
+
+    private static byte[] createIntegrityHash(String masterPassword, byte[] data, byte[] ivBytes) throws IOException {
+        SHA512Digest messageDigest = new SHA512Digest();
+        HMac hmac = new HMac(messageDigest);
+        byte[] resBuf = new byte[hmac.getMacSize()];
+
+        byte[] keyBytes = generateKeyBytes(masterPassword, ivBytes);
+
+        hmac.init(new KeyParameter(keyBytes));
+        hmac.update(data, 0, data.length);
+        hmac.doFinal(resBuf, 0);
+        System.out.println(Utils.toHex(resBuf));
+        return resBuf;
+
     }
 
     /**
@@ -214,9 +234,8 @@ public class Main {
         }
         Path path = Paths.get("master_passwd");
         byte[] data = Files.readAllBytes(path);
-        integrity = Arrays.copyOf(data, 64);
-        byte[] salt = Arrays.copyOfRange(data, 64, 96);
-        byte[] hash = Arrays.copyOfRange(data, 96, data.length);
+        byte[] salt = Arrays.copyOf(data, 32);
+        byte[] hash = Arrays.copyOfRange(data, 32, data.length);
         return checkMasterPassword(masterPass, salt, hash);
 
     }
@@ -228,8 +247,7 @@ public class Main {
      * @param salt      Salt given in plaintext and concatenated to the front
      * @throws IOException Thrown if file doesn't exist
      */
-    //TODO add integrity check write code to here
-    private static void writeMasterPassHelper(byte[] hashedKey, byte[] salt, byte[] integrity) throws IOException {
+    private static void writeMasterPassHelper(byte[] hashedKey, byte[] salt) throws IOException {
         FileOutputStream fos = null;
         try {
             fos = new FileOutputStream("master_passwd");
@@ -238,11 +256,6 @@ public class Main {
         }
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        if (integrity == null) {
-            integrity = new byte[128];
-            Arrays.fill(integrity, (byte) 1);
-        }
-        outputStream.write(integrity);
         outputStream.write(salt);
         outputStream.write(hashedKey);
         byte[] outPut = outputStream.toByteArray();
@@ -278,7 +291,6 @@ public class Main {
      * @throws UnsupportedEncodingException Thrown if SHA512 is not supported
      */
     private static boolean checkMasterPassword(String password, byte[] salt, byte[] readPassword) throws IOException, NoSuchAlgorithmException {
-        int hashBytes = 32;
         //Check file, pass in salt and run the check
         // to check a password, given the known previous salt and hash:
         MessageDigest md = MessageDigest.getInstance("SHA-512");
@@ -323,7 +335,7 @@ public class Main {
         SecureRandom rng = new SecureRandom();
         byte[] salt = rng.generateSeed(seedBytes);
         try {
-            writeMasterPassHelper(setMasterPass(mastPass, salt), salt, createIntegrityHash(mastPass));
+            writeMasterPassHelper(setMasterPass(mastPass, salt), salt);
         } catch (IOException | NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
@@ -351,23 +363,28 @@ public class Main {
 
         ByteArrayOutputStream input = new ByteArrayOutputStream();
 
-        for (String mapKey : entryList.keySet()) {
-            input.write(Utils.toByteArray(entryList.get(mapKey).toString()));
-        }
+        for (String mapKey : entryList.keySet()) input.write(Utils.toByteArray(entryList.get(mapKey).toString()));
         // encryption pass
         cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
 
         ByteArrayInputStream bIn = new ByteArrayInputStream(input.toByteArray());
         CipherInputStream cIn = new CipherInputStream(bIn, cipher);
         ByteArrayOutputStream bOut = new ByteArrayOutputStream();
-        bOut.write(ivBytes);
+
+
         int ch;
         while ((ch = cIn.read()) >= 0) {
             bOut.write(ch);
         }
+        byte[] cipherText = bOut.toByteArray();
+
+        ByteArrayOutputStream basToFile = new ByteArrayOutputStream();
+        basToFile.write(createIntegrityHash(masterPass, cipherText, ivBytes)); //TODO might need to run save password file first?
+        basToFile.write(ivBytes);
+        basToFile.write(cipherText);
 
         try (OutputStream outputStream = new FileOutputStream("passwd_file")) {
-            bOut.writeTo(outputStream);
+            basToFile.writeTo(outputStream);
         }
 
         writeMasterPass(masterPass);
@@ -392,8 +409,7 @@ public class Main {
         byte[] data = Files.readAllBytes(path);
 
         if (data.length > 0) {
-
-            byte[] ivBytes = Arrays.copyOf(data, 16);
+            byte[] ivBytes = Arrays.copyOfRange(data, 64, 80);
             SHA512Digest messageDigest = new SHA512Digest();
             PKCS12ParametersGenerator kdf = new PKCS12ParametersGenerator(messageDigest);
             kdf.init(password.getBytes("UTF-8"), ivBytes, 1000);
@@ -410,11 +426,12 @@ public class Main {
 
             CipherOutputStream cOut = new CipherOutputStream(bOut, cipher);
 
-            cOut.write(Arrays.copyOfRange(data, 16, data.length));
+            cOut.write(Arrays.copyOfRange(data, 80, data.length));
 
             cOut.close();
 
             byte[] fileBytes = bOut.toByteArray();
+            System.out.println(fileBytes.length);
 
             int fileSize = fileBytes.length;
             int j = 0;
@@ -546,28 +563,16 @@ public class Main {
             this.password = fullString.substring(160, 240);
         }
 
-        public String getDomain() {
+        String getDomain() {
             return domain;
         }
 
-        public void setDomain(String domain) {
-            this.domain = domain;
-        }
-
-        public String getUser() {
+        String getUser() {
             return user;
         }
 
-        public void setUser(String user) {
-            this.user = user;
-        }
-
-        public String getPassword() {
+        String getPassword() {
             return password;
-        }
-
-        public void setPassword(String password) {
-            this.password = password;
         }
 
         /**
@@ -593,22 +598,6 @@ public class Main {
      * Static utility methods.
      */
     private static class Utils {
-        /**
-         * Return a string of length len made up of blanks.
-         *
-         * @param len the length of the output String.
-         * @return the string of blanks.
-         */
-        public static String makeBlankString(
-                int len) {
-            char[] buf = new char[len];
-
-            for (int i = 0; i != buf.length; i++) {
-                buf[i] = ' ';
-            }
-
-            return new String(buf);
-        }
 
         private static String digits = "0123456789abcdef";
 
@@ -619,8 +608,8 @@ public class Main {
          * @param length the number of bytes in the data block to be converted.
          * @return a hex representation of length bytes of data.
          */
-        public static String toHex(byte[] data, int length) {
-            StringBuffer buf = new StringBuffer();
+        static String toHex(byte[] data, int length) {
+            StringBuilder buf = new StringBuilder();
 
             for (int i = 0; i != length; i++) {
                 int v = data[i] & 0xff;
@@ -638,18 +627,18 @@ public class Main {
          * @param data the bytes to be converted.
          * @return a hex representation of data.
          */
-        public static String toHex(byte[] data) {
+        static String toHex(byte[] data) {
             return toHex(data, data.length);
         }
 
         /**
          * Create a key for use with AES.
          *
-         * @param bitLength
-         * @param random
+         * @param bitLength Length of the bits
+         * @param random a random number with Secure Random
          * @return an AES key.
-         * @throws NoSuchAlgorithmException
-         * @throws NoSuchProviderException
+         * @throws NoSuchAlgorithmException required for AES
+         * @throws NoSuchProviderException required for AES
          */
         public static SecretKey createKeyForAES(
                 int bitLength,
@@ -686,7 +675,7 @@ public class Main {
             ivBytes[0] = (byte) (messageNumber >> 24);
             ivBytes[1] = (byte) (messageNumber >> 16);
             ivBytes[2] = (byte) (messageNumber >> 8);
-            ivBytes[3] = (byte) (messageNumber >> 0);
+            ivBytes[3] = (byte) (messageNumber);
 
             // set the counter bytes to 1
 
@@ -706,7 +695,7 @@ public class Main {
          * @param length the number of bytes to process
          * @return a String representation of bytes
          */
-        public static String toString(
+        static String toString(
                 byte[] bytes,
                 int length) {
             char[] chars = new char[length];
@@ -718,7 +707,7 @@ public class Main {
             return new String(chars);
         }
 
-        public static String toStringRange(byte[] bytes, int start, int end) {
+        static String toStringRange(byte[] bytes, int start, int end) {
             char[] chars = new char[end - start];
             int j = 0;
             for (int i = start; i != end; i++) {
