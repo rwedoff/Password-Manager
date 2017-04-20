@@ -1,4 +1,3 @@
-import com.sun.xml.internal.bind.v2.TODO;
 import org.bouncycastle.crypto.digests.SHA512Digest;
 import org.bouncycastle.crypto.generators.PKCS12ParametersGenerator;
 import org.bouncycastle.crypto.macs.HMac;
@@ -14,16 +13,14 @@ import java.nio.file.Paths;
 import java.security.*;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.InputMismatchException;
 import java.util.Scanner;
 
 public class Main {
     private static HashMap<String, Entry> entryList = new HashMap<>();
-    private static byte[] integrity;
     private static String padChar = "!";
-    private static boolean firstRun = false;
 
     public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
-        //Todo Figure out how to run from commandline
         //Configuration steps:  Add Bouncy Castle jars to project, test if we actually need both.  todo
         //Check Java security to make sure the JRE can do some security magic... (Potential Error: Invalid Key Length)
 
@@ -35,7 +32,7 @@ public class Main {
         File master_passwd_file = new File("master_passwd");
         File passwd_file = new File("passwd_file");
 
-        String initPass = null;
+        String initPass;
         if (!(master_passwd_file.exists() && passwd_file.exists())) {
             //Registers a new user
             System.out.println("New User, please enter in a Master Password:");
@@ -83,49 +80,54 @@ public class Main {
             System.out.println("5: Get Password");
             System.out.println("0: Save/Exit");
             //TODO, avoid crashing the program by catching strings as well
-            int option = scan.nextInt();
-            switch (option) {
-                case 1:
-                    checkIntegrity(mastPass);
-                    break;
-                case 2:
-                    addAccount();
-                    break;
-                case 3:
-                    deleteAccount();
-                    break;
-                case 4:
-                    changeAccount();
-                    break;
-                case 5:
-                    getAccount();
-                    break;
-                case 0:
-                    System.out.println("Saving...");
-                    try {
-                        encryptFile(mastPass);
-                    } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
-                        e.printStackTrace();
-                    }
-                    System.out.println("Exiting...");
-                    System.exit(0);
-                    break;
-                //TODO REMOVE; only for debug!
-                case 9:
-                    System.out.println("Printing List");
-                    printEntryList();
-                    break;
-                //TODO remove for debug only, saves without changing integrity
-                case 8:
-                    try {
-                        encryptFileNoIntegrity(mastPass);
-                    } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
-                        e.printStackTrace();
-                    }
-                    break;
-                default:
-                    System.out.println("Not a command");
-                    break;
+            String strOption = scan.nextLine();
+            try{
+                int option = Integer.parseInt(strOption);
+                switch (option) {
+                    case 1:
+                        checkIntegrity(mastPass);
+                        break;
+                    case 2:
+                        addAccount();
+                        break;
+                    case 3:
+                        deleteAccount();
+                        break;
+                    case 4:
+                        changeAccount();
+                        break;
+                    case 5:
+                        getAccount();
+                        break;
+                    case 0:
+                        System.out.println("Saving...");
+                        try {
+                            encryptFile(mastPass);
+                        } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
+                            e.printStackTrace();
+                        }
+                        System.out.println("Exiting...");
+                        System.exit(0);
+                        break;
+                    //TODO REMOVE; only for debug!
+                    case 9:
+                        System.out.println("Printing List");
+                        printEntryList();
+                        break;
+                    //TODO remove for debug only, saves without changing integrity
+                    case 8:
+                        try {
+                            encryptFileNoIntegrity(mastPass);
+                        } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | NoSuchProviderException e) {
+                            e.printStackTrace();
+                        }
+                        break;
+                    default:
+                        System.out.println("Not a command");
+                        break;
+                }
+            } catch (NumberFormatException ip){
+                System.out.println("Please enter a number for the command");
             }
         }
 
@@ -164,14 +166,9 @@ public class Main {
     }
 
     private static boolean checkIntegrityHelper(String masterPassword) throws NoSuchAlgorithmException, IOException {
-        //TODO REMOVE all of this first run stuff
-        if (firstRun) {
-            System.out.println("Nothing has been saved on the first run");
-            return true;
-        }
         Path path = Paths.get("passwd_file");
         byte[] data = Files.readAllBytes(path);
-        integrity = Arrays.copyOf(data, 64);
+        byte[] integrity = Arrays.copyOf(data, 64);
         byte[] ivBytes = Arrays.copyOfRange(data, 64, 80);
         byte[] cipherText = Arrays.copyOfRange(data, 80, data.length);
         byte[] resBuf = createIntegrityHash(masterPassword, cipherText, ivBytes);
@@ -197,13 +194,10 @@ public class Main {
         SHA512Digest messageDigest = new SHA512Digest();
         HMac hmac = new HMac(messageDigest);
         byte[] resBuf = new byte[hmac.getMacSize()];
-
         byte[] keyBytes = generateKeyBytes(masterPassword, ivBytes);
-
         hmac.init(new KeyParameter(keyBytes));
         hmac.update(data, 0, data.length);
         hmac.doFinal(resBuf, 0);
-        // System.out.println(Utils.toHex(resBuf));
         return resBuf;
 
     }
@@ -233,15 +227,11 @@ public class Main {
      * @throws IOException IOException if file is not found.
      */
     private static boolean readMasterPass(String masterPass) throws IOException, NoSuchAlgorithmException {
-        if (firstRun) {
-            return true;
-        }
         Path path = Paths.get("master_passwd");
         byte[] data = Files.readAllBytes(path);
         byte[] salt = Arrays.copyOf(data, 32);
         byte[] hash = Arrays.copyOfRange(data, 32, data.length);
         return checkMasterPassword(masterPass, salt, hash);
-
     }
 
     /**
@@ -383,7 +373,7 @@ public class Main {
         byte[] cipherText = bOut.toByteArray();
 
         ByteArrayOutputStream basToFile = new ByteArrayOutputStream();
-        basToFile.write(createIntegrityHash(masterPass, cipherText, ivBytes)); //TODO might need to run save password file first?
+        basToFile.write(createIntegrityHash(masterPass, cipherText, ivBytes));
         basToFile.write(ivBytes);
         basToFile.write(cipherText);
 
@@ -435,7 +425,6 @@ public class Main {
             cOut.close();
 
             byte[] fileBytes = bOut.toByteArray();
-            System.out.println(fileBytes.length);
 
             int fileSize = fileBytes.length;
             int j = 0;
@@ -461,6 +450,12 @@ public class Main {
             System.out.println("ERROR: Account Names, Usernames, and Passwords may not include '" + padChar + "'\nTry Again");
             accountName = scanner.nextLine();
         }
+        Entry e = getAccountHelper(accountName);
+
+        if (e != null && !(e.getDomain().equals(accountName))) {
+            System.out.println("USER ACCOUNT ALREADY EXISTS");
+            return;
+        }
         System.out.println("User Name:");
         String userName = scanner.nextLine();
         while(isIllegal(userName)){
@@ -474,12 +469,7 @@ public class Main {
             password = scanner.nextLine();
         }
 
-        Entry e = getAccountHelper(accountName);
-        //TODO CONSIDER moving this to right after accountName entry
-        if (e != null && !(e.getDomain().equals(accountName) && e.getUser().equals(userName))) {
-            System.out.println("USER ACCOUNT ALREADY EXISTS");
-            return;
-        }
+
         entryList.put(Utils.paddString(accountName), new Entry(accountName, userName, password));
     }
 
@@ -564,7 +554,7 @@ public class Main {
             newPassword = scanner.nextLine();
         }
 
-        entryList.replace(Utils.paddString(account), new Entry(account, userName, newPassword));
+        entryList.put(Utils.paddString(account), new Entry(account, userName, newPassword));
     }
 
     /**
