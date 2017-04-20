@@ -1,0 +1,33 @@
+Consider Feature Changes:
+
+0. run from command line - ask Omar about our implementation and whether he's okay with the 0,1,2,3,4 input. Otherwise....
+1. Pass integrity check on the first round: currently, it doesn't check the integrity of anything on the first round because nothing
+
+---- Reason, we don't save until after we exit the loop; we already have pulled the data so an attacker will never be able to enter data except through the proper input channel
+
+2. Input takes other commands that are not ints
+3. Add a catch all for ! and spaces in pretty much everything
+4. Should the hash be output to the command line like that? I commented it out.
+5. As of now, our program outputs a zero when we successfully enter the MasterPassword
+
+
+ADVANCED FEATURES:
+0. Alllow users to back out of registering/changing an account
+
+
+
+
+
+
+
+
+
+
+
+
+Master Password is encrypted using SHA512 Hash, the key for the AES using the PKCS etc. 12 with a SHA 512 Digest()
+
+AES Blocks, CTR mode
+
+
+Integrity from SHA512 HMAC; SHA512 Digest
